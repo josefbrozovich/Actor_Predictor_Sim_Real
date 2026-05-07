@@ -2,31 +2,24 @@ import os
 import argparse
 import torch
 
-parser = argparse.ArgumentParser(description="Options for running")
-# Added type=int so you can compare option == 1 instead of "1"
-parser.add_argument("--option", type=int, required=True, help="which configuration to use")
-parser.add_argument("--debug", type=bool, required=False, default=False)
-parser.add_argument("--gpu_num", type=str, required=False, default="3")
-parser.add_argument("--seed", type=int, required=True, default="0")
-parser.add_argument("--env", type=str, required=True, default="None")
-
-args = parser.parse_args()
-
-os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_num
-
 from envs.Navigation_Buttons_real import Navigation_Buttons_real
 
 # from agents.GRPO_Predict_RWR import GRPO_Predict_RWR
 from agents.uniform import uniform
 
+parser = argparse.ArgumentParser()
+parser.add_argument("network_interface", type=str)
+args = parser.parse_args()
+
+env = Navigation_Buttons_real(args.network_interface)
+
 # PyTorch
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
+torch.manual_seed(0)
+torch.cuda.manual_seed(0)
 
 ## JIT COntroller and Environment
 
-# number of environments
-env = Navigation_Buttons_real()
+
 
 # num_envs = 2048
 num_envs = 512
@@ -58,10 +51,10 @@ prediction_error = torch.zeros(epochs, dtype=torch.float, device=device)
 # dvel = torch.tensor([-1, 0, 1, 0], device=device)
 # dtheta = torch.tensor([0, torch.pi/2, 0, -torch.pi/2], device=device)
 
-dvel = torch.tensor([-0.2, 0, 0.2, 0], device=device)
-dtheta = torch.tensor([0, 0.2, 0, -0.2], device=device)
+dvel = torch.tensor([-0.5, 0, 0.5, 0], device=device)
+dtheta = torch.tensor([0, 0.5, 0, -0.5], device=device)
 
-action_space = 2
+action_space = 3
 num_actions = 4
 
 
@@ -78,33 +71,22 @@ for e in range(epochs):
 
     i = 0
 
-    actions = torch.zeros((num_envs, action_space), device=device)
-    actions_agent = torch.zeros((num_envs, num_actions), device=device)
+    actions = torch.zeros((num_envs, action_space), device=device, dtype=torch.long)
+    # one 
+    actions_agent = torch.zeros((num_envs, num_actions), device=device, dtype=torch.long)
 
     # getting rid of inital values, before restting
-    obs, reward, terminated, truncated, info = env.step(actions)
+    # obs, reward, terminated, truncated, info = env.step(actions)
     obs, reward, terminated, truncated, info = env.step(actions)
 
     # reset
-    agent.reset_state(num_envs)
+    # agent.reset_state(num_envs)
 
     # experimenting without env.reset()
-    obs, info = env.reset()
+    # obs, info = env.reset()
     
     no_action = torch.zeros(action_space, device=device)
 
-    # target_radius = 2*2**(1/2)
-    target_radius = 2**(1/2)
-
-    base_speed = 0.5
-    nominal_yaw = base_speed/target_radius
-    # Kp = 0.1
-    Kp = 0.1
-
-
-    prev_error=0
-
-    debug_action = 0
 
     # Step env
     with torch.no_grad():
@@ -112,24 +94,27 @@ for e in range(epochs):
 
             hold = (terminated | truncated)
 
-            # agent does not control second robot
-            actions_agent[:, action] = 0
+
+            # prev_actions = action
 
             action = agent.get_action(obs["policy"], actions_agent)
+
+            # actions_agent[:, prev_actions] = 0
 
             # for learning
             actions_agent[:, action] = 1
 
-            # for environment
-            actions[:, 0] = dvel[action]
-            # we don't want lateral movement
-            actions[:, 2] = dtheta[action]
 
-            actions[hold, :] = no_action
-            # 
+            # # for environment
+            actions[:, 0] = dvel[action]
+            # # we don't want lateral movement
+            actions[:, 2] = dtheta[action]
 
             # step
             obs, reward, new_terminated, truncated, info = env.step(actions)
+
+            print(f"obs")
+            print(obs)
 
             terminated = terminated | new_terminated
 

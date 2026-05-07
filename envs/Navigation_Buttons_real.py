@@ -185,14 +185,16 @@ class Navigation_Buttons_real:
 
     def step(self, actions):
         """
-        actions are discrete, 1,2,3,4
+        actions are discrete, 0, 1, 2, 3
         """
 
-        vx = self.dvel[actions]
-        yaw_rate = self.dtheta[actions]
+        print(f"actions: {actions}")
+
+        vx = actions[0,0].item()
+        yaw_rate = actions[0,2].item()
 
         # Unitree Sport API: Move(vx, vy, vyaw)
-        self.sport_client.Move(vx, 0*yaw_rate, yaw_rate)
+        self.sport_client.Move(vx, 0.0, yaw_rate)
 
         time.sleep(self.DT)
 
@@ -218,7 +220,6 @@ class Navigation_Buttons_real:
         }
 
         return obs, reward, terminated, truncated, self.info
-
 
     def close(self):
         self.sport_client.StopMove()
