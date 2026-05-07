@@ -58,6 +58,11 @@ class Navigation_Buttons_real:
         self.MAX_YAW_RATE = 0.4
         self.DT = 0.1
 
+        # In real environment, everything will run on cpu
+        self.dvel = torch.tensor([-0.2, 0, 0.2, 0])
+        self.dtheta = torch.tensor([0, 0.2, 0, -0.2])
+
+
         if network_interface is None:
             if len(sys.argv) < 2:
                 raise RuntimeError("Usage: python script.py <network_interface>")
@@ -112,57 +117,6 @@ class Navigation_Buttons_real:
 
         obs = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
         return {"policy": obs}
-
-    def _discrete_action_to_velocity(self, action_id: int):
-        """
-        Optional discrete action mapping for testing.
-
-        0 = stop
-        1 = forward
-        2 = turn left
-        3 = turn right
-        """
-        if action_id == 0:
-            return 0.0, 0.0
-        elif action_id == 1:
-            return self.MAX_VX, 0.0
-        elif action_id == 2:
-            return 0.0, self.MAX_YAW_RATE
-        elif action_id == 3:
-            return 0.0, -self.MAX_YAW_RATE
-        else:
-            raise ValueError(f"Invalid discrete action {action_id}. Expected 0, 1, 2, or 3.")
-
-    def _parse_action(self, actions):
-        """
-        Accepts either:
-        - continuous action: [vx, yaw_rate] or shape (1, 2)
-        - discrete action: scalar 0, 1, 2, or 3
-        """
-        if torch.is_tensor(actions):
-            actions = actions.detach().cpu().reshape(-1).numpy()
-        else:
-            actions = np.array(actions).reshape(-1)
-
-        # Discrete action
-        if actions.size == 1:
-            action_id = int(actions[0])
-            vx, yaw_rate = self._discrete_action_to_velocity(action_id)
-
-        # Continuous action: [vx, yaw_rate]
-        elif actions.size == 2:
-            vx = float(actions[0])
-            yaw_rate = float(actions[1])
-
-        else:
-            raise ValueError(
-                f"Expected action to be either scalar discrete action or [vx, yaw_rate], got shape {actions.shape}"
-            )
-
-        vx = float(np.clip(vx, -self.MAX_VX, self.MAX_VX))
-        yaw_rate = float(np.clip(yaw_rate, -self.MAX_YAW_RATE, self.MAX_YAW_RATE))
-
-        return vx, yaw_rate
 
     def _update_tags_from_camera(self):
         code, data = self.client.GetImageSample()
@@ -230,40 +184,41 @@ class Navigation_Buttons_real:
         return self._make_obs(), self.info
 
     def step(self, actions):
-        vx, yaw_rate = self._parse_action(actions)
+        """
+        actions are discrete, 1,2,3,4
+        """
 
-        try:
-            # Unitree Sport API: Move(vx, vy, vyaw)
-            self.sport_client.Move(vx, 0.0, yaw_rate)
+        vx = self.dvel[actions]
+        yaw_rate = self.dtheta[actions]
 
-            time.sleep(self.DT)
+        # Unitree Sport API: Move(vx, vy, vyaw)
+        self.sport_client.Move(vx, 0*yaw_rate, yaw_rate)
 
-            self._update_tags_from_camera()
+        time.sleep(self.DT)
 
-            obs = self._make_obs()
+        self._update_tags_from_camera()
 
-            reward_float = self.temporal_logic.memory_reward_AB(
-                self.tag_estimates,
-                threshold=0.5,
-            )
+        obs = self._make_obs()
 
-            reward = torch.tensor([reward_float], dtype=torch.float32)
-            terminated = torch.tensor([False])
-            truncated = torch.tensor([False])
+        reward_float = self.temporal_logic.memory_reward_AB(
+            self.tag_estimates,
+            threshold=0.5,
+        )
 
-            self.info = {
-                "tag_estimates": copy.deepcopy(self.tag_estimates),
-                "blue_memory": self.temporal_logic.blue,
-                "green_memory": self.temporal_logic.green,
-                "vx": vx,
-                "yaw_rate": yaw_rate,
-            }
+        reward = torch.tensor([reward_float], dtype=torch.float32)
+        terminated = torch.tensor([False])
+        truncated = torch.tensor([False])
 
-            return obs, reward, terminated, truncated, self.info
+        self.info = {
+            "tag_estimates": copy.deepcopy(self.tag_estimates),
+            "blue_memory": self.temporal_logic.blue,
+            "green_memory": self.temporal_logic.green,
+            "vx": vx,
+            "yaw_rate": yaw_rate,
+        }
 
-        except Exception:
-            self.sport_client.StopMove()
-            raise
+        return obs, reward, terminated, truncated, self.info
+
 
     def close(self):
         self.sport_client.StopMove()
